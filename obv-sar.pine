@@ -1,0 +1,245 @@
+//@version=5
+indicator(title="Parabolic Trend[LeonidasCrypto]", shorttitle="PTL", format=format.price, precision=2,overlay=true)
+
+// Function to select the type of source
+get_src(Type) =>
+    if Type == "VWAP"
+        ta.vwap
+    else if Type == "Close"
+        close
+    else if Type == "Open"
+        open
+    else if Type == "HL2"
+        hl2
+    else if Type == "HLC3"
+        hlc3
+    else if Type == "OHLC4"
+        ohlc4
+    else if Type == "Volume"
+        nz(volume)
+    else if Type == "High"
+        high
+    else if Type == "Low"
+        low
+    else if Type == "vwap(Close)"
+        ta.vwap(close)
+    else if Type == "vwap(Open)"
+        ta.vwap(open)
+    else if Type == "vwap(High)"
+        ta.vwap(high)
+    else if Type == "vwap(Low)"
+        ta.vwap(low)
+    else if Type == "AVG(vwap(H,L))"
+        math.avg(ta.vwap(high), ta.vwap(low))
+    else if Type == "AVG(vwap(O,C))"
+        math.avg(ta.vwap(open), ta.vwap(close))
+    else if Type == "OBV" // On Balance Volume
+        ta.obv
+    else if Type == "AccDist" // Accumulation Distribution
+        ta.accdist
+    else if Type == "PVT" // Price Volume Trend
+        ta.pvt
+        
+        
+f_c_gradientAdvDecPro(_source, _center, _steps, _c_bearWeak, _c_bearStrong, _c_bullWeak, _c_bullStrong) =>
+    var float _qtyAdvDec = 0.
+    var float _maxSteps  = math.max(1, _steps)
+    bool  _xUp     = ta.crossover(_source, _center)
+    bool  _xDn     = ta.crossunder(_source, _center)
+    float _chg     = ta.change(_source)
+    bool  _up      = _chg > 0
+    bool  _dn      = _chg < 0
+    bool  _srcBull = _source > _center
+    bool  _srcBear = _source < _center
+    _qtyAdvDec := 
+      _srcBull ? _xUp ? 1 : _up ? math.min(_maxSteps, _qtyAdvDec + 1) : _dn ? math.max(1, _qtyAdvDec - 1) : _qtyAdvDec :
+      _srcBear ? _xDn ? 1 : _dn ? math.min(_maxSteps, _qtyAdvDec + 1) : _up ? math.max(1, _qtyAdvDec - 1) : _qtyAdvDec : _qtyAdvDec
+    var color _return = na
+    _return := 
+      _srcBull ? color.from_gradient(_qtyAdvDec, 1, _maxSteps, _c_bullWeak, _c_bullStrong) : 
+      _srcBear ? color.from_gradient(_qtyAdvDec, 1, _maxSteps, _c_bearWeak, _c_bearStrong) : _return
+
+// Kaufman's Adaptive Moving Average - Fast and Slow Ends
+fastK = 0.666 // KAMA Fast End
+slowK = 0.645 // KAMA Slow End
+kama(x, t)=>
+    dist   = math.abs(x[0] - x[1])
+    signal = math.abs(x - x[t])
+    noise  = math.sum(dist, t)
+    effr   = noise != 0 ? signal/noise : 1
+    sc     = math.pow(effr*(fastK - slowK) + slowK,2)
+    KAMA   = x
+    KAMA  := nz(KAMA[1]) + sc*(x - nz(KAMA[1]))
+    KAMA
+
+// Jurik Moving Average of @everget
+jma(src, length, power, phase) => 
+    phaseRatio = phase < -100 ? 0.5 : phase > 100 ? 2.5 : phase / 100 + 1.5
+    beta = 0.45 * (length - 1) / (0.45 * (length - 1) + 2)
+    alpha = math.pow(beta, power)
+    JMA = 0.0
+    e0 = 0.0
+    e0 := (1 - alpha) * src + alpha * nz(e0[1])
+    e1 = 0.0
+    e1 := (src - e0) * (1 - beta) + beta * nz(e1[1])
+    e2 = 0.0
+    e2 := (e0 + phaseRatio * e1 - nz(JMA[1])) * math.pow(1 - alpha, 2) + math.pow(alpha, 2) * nz(e2[1])
+    JMA := e2 + nz(JMA[1])
+    JMA
+
+cti(sm, src, cd) =>
+    di = (sm - 1.0) / 2.0 + 1.0
+    c1 = 2 / (di + 1.0)
+    c2 = 1 - c1
+    c3 = 3.0 * (cd * cd + cd * cd * cd)
+    c4 = -3.0 * (2.0 * cd * cd + cd + cd * cd * cd)
+    c5 = 3.0 * cd + 1.0 + cd * cd * cd + 3.0 * cd * cd
+    i1 = 0.0
+    i2 = 0.0
+    i3 = 0.0
+    i4 = 0.0
+    i5 = 0.0
+    i6 = 0.0
+    i1 := c1*src + c2*nz(i1[1])
+    i2 := c1*i1 + c2*nz(i2[1])
+    i3 := c1*i2 + c2*nz(i3[1])
+    i4 := c1*i3 + c2*nz(i4[1])
+    i5 := c1*i4 + c2*nz(i5[1])
+    i6 := c1*i5 + c2*nz(i6[1])
+        
+    bfr = -cd*cd*cd*i6 + c3*(i5) + c4*(i4) + c5*(i3)
+    bfr
+    
+a = 0.618
+T3ma(src,Len) =>
+    e1 = ta.ema(src, Len)
+    e2 = ta.ema(e1, Len)
+    e3 = ta.ema(e2, Len)
+    e4 = ta.ema(e3, Len)
+    e5 = ta.ema(e4, Len)
+    e6 = ta.ema(e5, Len)
+    C1 = -a*a*a
+    C2 = 3*a*a+3*a*a*a
+    C3 = -6*a*a-3*a-3*a*a*a
+    C4 = 1+3*a+a*a*a+3*a*a
+    C1*e6+C2*e5+C3*e4+C4*e3
+
+VIDYA(src,Len) =>
+    mom     = ta.change(src)
+    upSum   = math.sum(math.max(mom, 0), Len)
+    downSum = math.sum(-math.min(mom, 0), Len)
+    out     = (upSum - downSum) / (upSum + downSum)
+    cmo     = math.abs(out)
+    alpha   = 2 / (Len + 1)
+    vidya   = 0.0
+    vidya   := src * alpha * cmo + nz(vidya[1]) * (1 - alpha * cmo)
+    vidya
+
+// ZLEMA: Zero Lag
+zema(_src, _len) =>
+    _alpha = (_len - 1) / 2
+    _zlema0 = (_src + (_src - _src[_alpha]))
+    _zlemaF = ta.ema(_zlema0, _len)
+
+ma(MAType, MASource, MAPeriod) =>
+    if MAPeriod > 0
+        if MAType == "SMA"
+            ta.sma(MASource, MAPeriod)
+        else if MAType == "EMA"
+            ta.ema(MASource, MAPeriod)
+        else if MAType == "WMA"
+            ta.wma(MASource, MAPeriod)
+        else if MAType == "RMA"
+            ta.rma(MASource, MAPeriod)
+        else if MAType == "HMA"
+            ta.hma(MASource, MAPeriod)
+        else if MAType == "DEMA"
+            e = ta.ema(MASource, MAPeriod)
+            2 * e - ta.ema(e, MAPeriod)
+        else if MAType == "TEMA"
+            e = ta.ema(MASource, MAPeriod)
+            3 * (e - ta.ema(e, MAPeriod)) + ta.ema(ta.ema(e, MAPeriod), MAPeriod)
+        else if MAType == "VWMA"
+            ta.vwma(MASource, MAPeriod)
+        else if MAType == "ALMA"
+            ta.alma(MASource, MAPeriod, .85, 6)
+        else if MAType == "CTI"
+            cti(MAPeriod, MASource, 0)
+        else if MAType == "KAMA"
+            kama(MASource, MAPeriod)
+        else if MAType == "SWMA" 
+            ta.swma(MASource)
+        else if MAType == "JMA"
+            jma(MASource, MAPeriod, 2, 50)
+        else if MAType == "LSMA"
+            ta.linreg(MASource, MAPeriod, 0) // Least Squares
+        else if MAType == "Wild"
+            wild = MASource
+            wild := nz(wild[1]) + (MASource - nz(wild[1])) / MAPeriod
+        else if MAType == "Tillson T3"
+            T3ma(MASource, MAPeriod)
+        else if MAType == "VIDYA"
+            VIDYA(MASource, MAPeriod)
+        else if MAType == "DWMA" // Double Weighted Moving Average
+            ta.wma(ta.wma(MASource, MAPeriod), MAPeriod)
+        else if MAType == "DVWMA" // Double Volume-Weighted Moving Average
+            ta.vwma(ta.vwma(MASource, MAPeriod), MAPeriod)
+        else if MAType == "Zero Lag"
+            zema(MASource, MAPeriod)
+            
+biggest(series) =>
+    max = 0.0
+    max := nz(max[1], series)
+    if series > max
+        max := series
+    max
+      
+
+//Trend Colors
+strongbullcolor = input(#00ffe7, title = "Strong Bull Color",group="Momentum")
+weakbullcolor   = input(#4000ff, title = "Weak Bull Color",group="Momentum")
+strongbearcolor = input(#ff0032, title = "Strong Bear Color",group="Momentum")
+weakbearcolor   = input(#ffff00, title = "Weak Bear Color",group="Momentum")
+stepn           = input(10, title = "Max Gradient Steps",group="Momentum")
+showbuysell     = input(false, title = "Show Buy and Sell Signal",group="Momentum")
+ematype         = input.string('ALMA', "Type", inline = "M", group="Momentum", options=["SMA", "EMA", "WMA", "DWMA", "VWMA", "DVWMA", "HMA", "ALMA", "Wild", "JMA", "KAMA", "Zero Lag", "Tillson T3", "VIDYA", "CTI", "RMA", "DEMA", "TEMA", "SWMA"])    
+emalen          = input(20, title = "Long term moving average",group="Momentum")
+
+//OBV calculations
+
+var cumVol = 0.
+cumVol += nz(volume)
+if barstate.islast and cumVol == 0
+    runtime.error("No volume is provided by the data vendor.")
+src = close
+obv = ta.cum(math.sign(ta.change(src)) * volume)
+
+//BB calculations
+
+length = input.int(14, minval=1)
+mult = input.float(1.5, minval=0.001, maxval=50, title="StdDev")
+offset = input.int(0, "Offset", minval = -500, maxval = 500)
+
+basis = ta.sma(src, length)
+dev = mult * ta.stdev(src, length)
+upper = basis + dev
+lower = basis - dev
+
+//RSI OBV calculations
+
+obvrsi= ta.rsi(obv,length)
+emaobv= ma(ematype,obv,emalen)
+
+trendcolor=f_c_gradientAdvDecPro(obvrsi,50,stepn,weakbearcolor,strongbearcolor,weakbullcolor,strongbullcolor)
+
+
+//buy condition
+
+buyCondition= obvrsi>=50 and ta.rising(emaobv,2)
+sellCondition= obvrsi<50 and ta.rising(emaobv,2)==false
+
+
+
+plot(buyCondition?lower:na,color=trendcolor,style= plot.style_circles,linewidth=2)
+
+plot(sellCondition?upper:na,color= trendcolor,style= plot.style_circles,linewidth=2)
